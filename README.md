@@ -15,6 +15,6 @@ Yêu cầu Node.js 18 trở lên.
 npm test
 ```
 
-## Đóng gớp
+## Đóng góp
 
 Tạo nhánh mới, commit thay đổi rồi mở Pull Request vào nhánh `main`.
