@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Rắn Neon</title>
+<style>
+  :root {
+    --bg: #0b0d17;
+    --panel: #141829;
+    --text: #e8ecff;
+    --muted: #8a93b8;
+    --snake: #39ff9f;
+    --head: #b6ffdd;
+    --food: #ff3fa4;
+    --grid: rgba(120, 140, 255, 0.06);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(circle at 50% 0%, #1a1f3d 0%, var(--bg) 60%);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px; gap: 12px;
+    touch-action: none; user-select: none;
+  }
+  h1 {
+    margin: 4px 0 0; font-size: 28px; letter-spacing: 2px;
+    color: var(--snake); text-shadow: 0 0 12px var(--snake);
+  }
+  .stats { display: flex; gap: 24px; font-size: 16px; color: var(--muted); }
+  .stats b { color: var(--text); font-size: 20px; }
+  .wrap { position: relative; width: min(480px, 100%); aspect-ratio: 1; }
+  canvas {
+    width: 100%; height: 100%; display: block;
+    background: var(--panel); border-radius: 12px;
+    box-shadow: 0 0 0 2px #2a3160, 0 0 40px rgba(57, 255, 159, 0.15);
+  }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    background: rgba(11, 13, 23, 0.78); border-radius: 12px; text-align: center; padding: 16px;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 { margin: 0; font-size: 26px; color: var(--food); text-shadow: 0 0 12px var(--food); }
+  .overlay p { margin: 0; color: var(--muted); line-height: 1.5; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; border: none; border-radius: 10px;
+    padding: 12px 24px; background: var(--snake); color: #062014;
+    box-shadow: 0 0 16px rgba(57, 255, 159, 0.5);
+  }
+  .pad { display: grid; grid-template-columns: repeat(3, 64px); gap: 8px; }
+  .pad button {
+    padding: 0; height: 56px; background: #1f2547; color: var(--text);
+    box-shadow: none; font-size: 22px;
+  }
+  .pad .sp { visibility: hidden; }
+  @media (hover: hover) and (pointer: fine) { .pad { display: none; } }
+  .hint { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>RẮN NEON</h1>
+  <div class="stats">
+    <div>Điểm: <b id="score">0</b></div>
+    <div>Kỷ lục: <b id="best">0</b></div>
+  </div>
+  <div class="wrap">
+    <canvas id="c" width="480" height="480"></canvas>
+    <div class="overlay" id="overlay">
+      <h2 id="title">Sẵn sàng?</h2>
+      <p id="msg">Dùng phím mũi tên / WASD, hoặc vuốt trên điện thoại.<br>Space để tạm dừng.</p>
+      <button id="start">Chơi</button>
+    </div>
+  </div>
+  <div class="pad">
+    <span class="sp"></span><button data-d="up">▲</button><span class="sp"></span>
+    <button data-d="left">◀</button><button data-d="down">▼</button><button data-d="right">▶</button>
+  </div>
+  <div class="hint">Ăn chấm hồng để lớn lên — càng dài càng nhanh!</div>
+
+<script>
+(() => {
+  const N = 20;                       // ô mỗi chiều
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const S = canvas.width / N;         // kích thước một ô
+  const $ = id => document.getElementById(id);
+  const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+
+  let snake, dir, queue, food, score, best, speed, running, paused, timer, particles = [];
+
+  try { best = +localStorage.getItem('ran-neon-best') || 0; } catch { best = 0; }
+  $('best').textContent = best;
+
+  function reset() {
+    snake = [[10, 10], [9, 10], [8, 10]];
+    dir = DIRS.right; queue = [];
+    score = 0; speed = 140;
+    $('score').textContent = 0;
+    placeFood();
+  }
+
+  function placeFood() {
+    do { food = [Math.floor(Math.random() * N), Math.floor(Math.random() * N)]; }
+    while (snake.some(([x, y]) => x === food[0] && y === food[1]));
+  }
+
+  function turn(name) {
+    const d = DIRS[name];
+    const last = queue.length ? queue[queue.length - 1] : dir;
+    if (d[0] === -last[0] && d[1] === -last[1]) return;   // không cho quay đầu 180°
+    if (d === last) return;
+    if (queue.length < 3) queue.push(d);
+  }
+
+  function step() {
+    if (queue.length) dir = queue.shift();
+    const head = [snake[0][0] + dir[0], snake[0][1] + dir[1]];
+    const hitWall = head[0] < 0 || head[1] < 0 || head[0] >= N || head[1] >= N;
+    const eating = head[0] === food[0] && head[1] === food[1];
+    const body = eating ? snake : snake.slice(0, -1);
+    if (hitWall || body.some(([x, y]) => x === head[0] && y === head[1])) return gameOver();
+
+    snake.unshift(head);
+    if (eating) {
+      score++;
+      $('score').textContent = score;
+      burst(food[0], food[1]);
+      beep(520 + score * 12, 0.08);
+      placeFood();
+      speed = Math.max(60, speed - 4);
+    } else {
+      snake.pop();
+    }
+    timer = setTimeout(step, speed);
+  }
+
+  function burst(cx, cy) {
+    for (let i = 0; i < 18; i++) {
+      const a = Math.random() * Math.PI * 2, v = 1 + Math.random() * 3;
+      particles.push({ x: (cx + 0.5) * S, y: (cy + 0.5) * S, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1 });
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid');
+    for (let i = 1; i < N; i++) {
+      ctx.beginPath(); ctx.moveTo(i * S, 0); ctx.lineTo(i * S, canvas.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * S); ctx.lineTo(canvas.width, i * S); ctx.stroke();
+    }
+    if (snake) {
+      // mồi nhấp nháy
+      const pulse = 0.75 + Math.sin(performance.now() / 150) * 0.15;
+      ctx.shadowBlur = 20; ctx.shadowColor = '#ff3fa4'; ctx.fillStyle = '#ff3fa4';
+      ctx.beginPath();
+      ctx.arc((food[0] + 0.5) * S, (food[1] + 0.5) * S, S * 0.35 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+
+      // thân rắn
+      ctx.shadowColor = '#39ff9f';
+      snake.forEach(([x, y], i) => {
+        ctx.fillStyle = i === 0 ? '#b6ffdd' : `hsl(${150 - i * 2}, 100%, ${60 - Math.min(i, 20)}%)`;
+        ctx.shadowBlur = i === 0 ? 24 : 12;
+        const p = 2;
+        ctx.beginPath();
+        ctx.roundRect(x * S + p, y * S + p, S - p * 2, S - p * 2, 6);
+        ctx.fill();
+      });
+      ctx.shadowBlur = 0;
+    }
+    // hạt nổ khi ăn
+    particles = particles.filter(p => p.life > 0);
+    particles.forEach(p => {
+      p.x += p.vx; p.y += p.vy; p.life -= 0.03;
+      ctx.globalAlpha = Math.max(p.life, 0);
+      ctx.fillStyle = '#ff3fa4';
+      ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+    });
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(draw);
+  }
+
+  let audio;
+  function beep(freq, dur) {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.06, audio.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + dur);
+      o.connect(g).connect(audio.destination);
+      o.start(); o.stop(audio.currentTime + dur);
+    } catch {}
+  }
+
+  function start() {
+    reset();
+    running = true; paused = false;
+    $('overlay').classList.add('hidden');
+    clearTimeout(timer);
+    timer = setTimeout(step, speed);
+  }
+
+  function gameOver() {
+    running = false;
+    beep(160, 0.4);
+    if (score > best) {
+      best = score;
+      $('best').textContent = best;
+      try { localStorage.setItem('ran-neon-best', best); } catch {}
+    }
+    $('title').textContent = 'Thua rồi!';
+    $('msg').innerHTML = `Bạn được <b>${score}</b> điểm.` + (score === best && score > 0 ? '<br>🎉 Kỷ lục mới!' : '');
+    $('start').textContent = 'Chơi lại';
+    $('overlay').classList.remove('hidden');
+  }
+
+  function togglePause() {
+    if (!running) return;
+    paused = !paused;
+    if (paused) {
+      clearTimeout(timer);
+      $('title').textContent = 'Tạm dừng';
+      $('msg').textContent = 'Nhấn Space hoặc nút bên dưới để chơi tiếp.';
+      $('start').textContent = 'Tiếp tục';
+      $('overlay').classList.remove('hidden');
+    } else {
+      $('overlay').classList.add('hidden');
+      timer = setTimeout(step, speed);
+    }
+  }
+
+  const KEYS = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    w: 'up', s: 'down', a: 'left', d: 'right', W: 'up', S: 'down', A: 'left', D: 'right',
+  };
+  document.addEventListener('keydown', e => {
+    if (e.key === ' ') {
+      e.preventDefault();
+      running ? togglePause() : start();
+      return;
+    }
+    if (KEYS[e.key]) {
+      e.preventDefault();
+      if (running && !paused) turn(KEYS[e.key]);
+    }
+  });
+
+  $('start').addEventListener('click', () => (running && paused ? togglePause() : start()));
+  document.querySelectorAll('.pad button').forEach(b =>
+    b.addEventListener('pointerdown', e => { e.preventDefault(); if (running && !paused) turn(b.dataset.d); }));
+
+  // vuốt trên màn hình cảm ứng
+  let t0 = null;
+  canvas.addEventListener('pointerdown', e => { t0 = [e.clientX, e.clientY]; });
+  canvas.addEventListener('pointerup', e => {
+    if (!t0 || !running || paused) return;
+    const dx = e.clientX - t0[0], dy = e.clientY - t0[1];
+    if (Math.max(Math.abs(dx), Math.abs(dy)) > 20)
+      turn(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+    t0 = null;
+  });
+
+  draw();
+})();
+</script>
+</body>
+</html>
